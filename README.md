@@ -1,5 +1,10 @@
 # AWS WasteFinder
 
+[![Tests](https://github.com/devopsjunctionn/AWS-WasteFinder/actions/workflows/tests.yml/badge.svg)](https://github.com/devopsjunctionn/AWS-WasteFinder/actions/workflows/tests.yml)
+[![Security](https://github.com/devopsjunctionn/AWS-WasteFinder/actions/workflows/security.yml/badge.svg)](https://github.com/devopsjunctionn/AWS-WasteFinder/actions/workflows/security.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+
 **Stop paying for cloud resources you forgot to delete.**
 
 AWS WasteFinder scans your entire AWS account across all regions and finds 6 types of waste that silently drain your budget every month.
@@ -63,7 +68,7 @@ python wasteFinder.py
 ```
 ╔═══════════════════════════════════════════════════════════╗
 ║                                                           ║
-║             AWS WASTEFINDER - FREE EDITION                ║
+║                 AWS WASTEFINDER                           ║
 ║                                                           ║
 ║          Scan for Cloud Waste in 6 Categories             ║
 ║                                                           ║
@@ -221,28 +226,14 @@ set AWS_SECRET_ACCESS_KEY=your-secret-key
 
 ---
 
-## Upgrade to WasteFinder Pro
-
-Like what you see? **WasteFinder Pro** adds professional features:
-
-### Pro Features (₹999 / $12 USD)
-✅ **Notion Dashboard** - Visual reports you can share with your team  
-✅ **PDF Export** - Professional reports for clients/management  
-✅ **Scheduled Scans** - Automated weekly/monthly checks  
-✅ **Email Notifications** - Get alerted when waste is detected
-✅ **AI Analysis** - GPT-4 explains WHY resources are wasting money 
-
-
----
-
 ## Contributing
 
-Contributions are welcome! Here's how you can help:
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for:
 
-1. **Report bugs** - Open an issue if you find something broken
-2. **Suggest features** - What waste types should we add next?
-3. **Submit PRs** - Improve the code, add documentation
-4. **Share** - Star the repo and tell your DevOps friends
+- Setting up your development environment
+- Running tests
+- Branch naming conventions
+- PR process
 
 ---
 
@@ -254,19 +245,62 @@ This project is licensed under the MIT License
 
 ---
 
-## Important Notes
+## 🔒 Security
 
-### Safety
-- This tool is **READ-ONLY** - it never deletes anything automatically
-- Always verify findings before deleting resources
+This tool is **100% read-only** and never modifies or deletes any AWS resources.
+
+### IAM Policy (Minimal Permissions)
+
+For maximum security, create a dedicated IAM user with only the permissions WasteFinder needs. Copy this policy:
+
+<details>
+<summary>Click to expand IAM Policy JSON</summary>
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "WasteFinderReadOnly",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeVolumes",
+        "ec2:DescribeAddresses",
+        "ec2:DescribeRegions",
+        "ec2:DescribeSnapshots",
+        "ec2:DescribeNatGateways",
+        "elasticloadbalancing:DescribeLoadBalancers",
+        "elasticloadbalancing:DescribeTargetGroups",
+        "elasticloadbalancing:DescribeTargetHealth",
+        "sagemaker:ListNotebookInstances",
+        "sagemaker:DescribeNotebookInstance",
+        "sts:GetCallerIdentity"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+</details>
+
+> **Note:** This policy is also available in [`iam-policy.json`](iam-policy.json) for easy import.
+
+### Security Practices
+
+- **Automated Security Scanning**: CodeQL analysis on every push
+- **Dependency Updates**: Dependabot enabled for security patches  
+- **No Secrets**: Never stores or transmits AWS credentials
+- **Open Source**: Full code visibility for audit
+
+### Safety Guarantees
+
+- This tool **never deletes anything** automatically
+- Always verify findings before taking action
 - Test deletion commands in a dev account first
 
-### Permissions
-- Requires AWS IAM `ReadOnlyAccess` policy
-- No write permissions needed
-- Safe to run in production accounts
-
 ### Costs
+
 - Running this script is **FREE** (only reads data, no API charges)
 - Deleting resources after scanning saves you money
 

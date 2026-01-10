@@ -1,0 +1,23 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "WasteFinderReadOnly",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:DescribeVolumes",
+                "ec2:DescribeAddresses",
+                "ec2:DescribeRegions",
+                "ec2:DescribeSnapshots",
+                "ec2:DescribeNatGateways",
+                "elasticloadbalancing:DescribeLoadBalancers",
+                "elasticloadbalancing:DescribeTargetGroups",
+                "elasticloadbalancing:DescribeTargetHealth",
+                "sagemaker:ListNotebookInstances",
+                "sagemaker:DescribeNotebookInstance",
+                "sts:GetCallerIdentity"
+            ],
+            "Resource": "*"
+        }
+    ]
+}

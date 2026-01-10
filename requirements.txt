@@ -6,3 +6,12 @@ boto3>=1.26.0
 
 # Boto3's core functionality (installed automatically with boto3, but listed for completeness)
 botocore>=1.29.0
+
+# ============ Development Dependencies ============
+# Install these for running tests:
+# pip install pytest pytest-cov moto[ec2,elbv2,sagemaker,sts]
+
+# Testing
+# pytest>=7.0.0
+# pytest-cov>=4.0.0
+# moto[ec2,elbv2,sagemaker,sts]>=4.0.0

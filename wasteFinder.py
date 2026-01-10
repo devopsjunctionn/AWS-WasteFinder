@@ -8,7 +8,7 @@ GitHub: https://github.com/devopsjunctionn/AWS-WasteFinder
 License: MIT
 """
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 import boto3
 import logging
