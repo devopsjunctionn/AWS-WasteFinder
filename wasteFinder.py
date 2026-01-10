@@ -3,17 +3,61 @@
 AWS WasteFinder - Free Edition
 Scans for 6 types of cloud waste across all AWS regions
 
-Author: [Your Name]
-GitHub: [Your GitHub URL]
+Author: Vaibhav Thukral
+GitHub: https://github.com/devopsjunctionn/AWS-WasteFinder
 License: MIT
 """
 
+__version__ = "1.0.0"
+
 import boto3
-from datetime import datetime, timedelta
+import logging
+import time
+from datetime import datetime, timedelta, timezone
 from botocore.exceptions import ClientError
 import sys
 
+# Configure logging - set to DEBUG for troubleshooting
+logging.basicConfig(
+    level=logging.WARNING,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 class AWSWasteFinder:
+    """
+    AWS WasteFinder scans for unused/idle resources that cost money.
+    
+    Pricing data last verified: January 2026
+    Note: AWS prices vary by region; these are US East (N. Virginia) estimates.
+    For accurate pricing, consult: https://aws.amazon.com/pricing/
+    """
+    
+    # Centralized pricing configuration (USD) - Last updated: January 2026
+    PRICING = {
+        'ebs_per_gb': {
+            'gp2': 0.10, 'gp3': 0.08, 'io1': 0.125,
+            'io2': 0.125, 'st1': 0.045, 'sc1': 0.015,
+            'standard': 0.05
+        },
+        'elastic_ip': 3.60,           # Per unused IP/month (since Feb 2024)
+        'snapshot_per_gb': 0.05,      # Per GB/month
+        'nat_gateway': 32.40,         # Base monthly cost (excludes data transfer)
+        'load_balancer': {
+            'application': 18.0,      # ALB monthly base
+            'network': 22.0,          # NLB monthly base
+            'classic': 18.0           # Classic ELB monthly base
+        },
+        'sagemaker_instances': {
+            'ml.t3.medium': 70, 'ml.t3.large': 120,
+            'ml.m5.xlarge': 230, 'ml.p3.2xlarge': 490,
+            'default': 100
+        }
+    }
+    
+    # Rate limiting: seconds to wait between region scans
+    SCAN_DELAY = 0.3
+    
     def __init__(self):
         self.total_waste = 0
         self.findings = []
@@ -59,12 +103,7 @@ class AWSWasteFinder:
                     create_time = vol['CreateTime']
                     
                     # Cost calculation based on volume type
-                    cost_per_gb = {
-                        'gp2': 0.10, 'gp3': 0.08, 'io1': 0.125,
-                        'io2': 0.125, 'st1': 0.045, 'sc1': 0.015,
-                        'standard': 0.05
-                    }
-                    monthly_cost = size_gb * cost_per_gb.get(vol_type, 0.10)
+                    monthly_cost = size_gb * self.PRICING['ebs_per_gb'].get(vol_type, 0.10)
                     
                     days_orphaned = (datetime.now(create_time.tzinfo) - create_time).days
                     
@@ -79,9 +118,9 @@ class AWSWasteFinder:
                     })
         except ClientError as e:
             if 'AuthFailure' not in str(e):
-                print(f"  Error scanning EBS in {region}: {e}")
+                logger.warning(f"Error scanning EBS in {region}: {e}")
         except Exception as e:
-            pass
+            logger.debug(f"Unexpected error scanning EBS in {region}: {e}")
             
         return findings
     
@@ -100,22 +139,29 @@ class AWSWasteFinder:
                 # If no AssociationId, the IP is not attached to anything
                 if 'AssociationId' not in addr:
                     public_ip = addr['PublicIp']
-                    allocation_id = addr.get('AllocationId', 'N/A')
+                    allocation_id = addr.get('AllocationId')
+                    
+                    # EC2-Classic IPs don't have AllocationId - handle differently
+                    if allocation_id:
+                        action = f"aws ec2 release-address --allocation-id {allocation_id} --region {region}"
+                    else:
+                        # EC2-Classic IP (legacy) - use public IP to release
+                        action = f"aws ec2 release-address --public-ip {public_ip} --region {region}"
                     
                     findings.append({
                         'type': 'Elastic IP',
                         'id': public_ip,
                         'region': region,
-                        'details': f"Allocation: {allocation_id}",
+                        'details': f"Allocation: {allocation_id or 'EC2-Classic'}",
                         'age': 'Unattached',
-                        'monthly_cost': 3.60,
-                        'action': f"aws ec2 release-address --allocation-id {allocation_id} --region {region}"
+                        'monthly_cost': self.PRICING['elastic_ip'],
+                        'action': action
                     })
         except ClientError as e:
             if 'AuthFailure' not in str(e):
-                print(f"  Error scanning IPs in {region}: {e}")
+                logger.warning(f"Error scanning IPs in {region}: {e}")
         except Exception as e:
-            pass
+            logger.debug(f"Unexpected error scanning IPs in {region}: {e}")
             
         return findings
     
@@ -149,7 +195,7 @@ class AWSWasteFinder:
                         break
                 
                 if not has_healthy_targets:
-                    cost = 18.0 if lb_type == 'application' else 22.0
+                    cost = self.PRICING['load_balancer'].get(lb_type, 18.0)
                     
                     findings.append({
                         'type': 'Load Balancer',
@@ -160,12 +206,32 @@ class AWSWasteFinder:
                         'monthly_cost': cost,
                         'action': f"aws elbv2 delete-load-balancer --load-balancer-arn {lb_arn} --region {region}"
                     })
+            
+            # Also check Classic Load Balancers (ELB)
+            elb = boto3.client('elb', region_name=region)
+            classic_lbs = elb.describe_load_balancers()['LoadBalancerDescriptions']
+            
+            for clb in classic_lbs:
+                clb_name = clb['LoadBalancerName']
+                instances = clb.get('Instances', [])
+                
+                # Check if Classic LB has any registered instances
+                if not instances:
+                    findings.append({
+                        'type': 'Load Balancer',
+                        'id': clb_name,
+                        'region': region,
+                        'details': 'Type: CLASSIC',
+                        'age': 'No registered instances',
+                        'monthly_cost': self.PRICING['load_balancer']['classic'],
+                        'action': f"aws elb delete-load-balancer --load-balancer-name {clb_name} --region {region}"
+                    })
                     
         except ClientError as e:
             if 'AuthFailure' not in str(e) and 'AccessDenied' not in str(e):
-                print(f"  Error scanning Load Balancers in {region}: {e}")
+                logger.warning(f"Error scanning Load Balancers in {region}: {e}")
         except Exception as e:
-            pass
+            logger.debug(f"Unexpected error scanning Load Balancers in {region}: {e}")
             
         return findings
     
@@ -186,7 +252,7 @@ class AWSWasteFinder:
             volumes = ec2.describe_volumes()['Volumes']
             current_volume_ids = {v['VolumeId'] for v in volumes}
             
-            ninety_days_ago = datetime.now(datetime.now().astimezone().tzinfo) - timedelta(days=90)
+            ninety_days_ago = datetime.now(timezone.utc) - timedelta(days=90)
             
             for snap in snapshots:
                 snap_id = snap['SnapshotId']
@@ -196,7 +262,7 @@ class AWSWasteFinder:
                 
                 # Flag if snapshot is from a deleted volume AND is older than 90 days
                 if volume_id not in current_volume_ids and start_time < ninety_days_ago:
-                    monthly_cost = size_gb * 0.05
+                    monthly_cost = size_gb * self.PRICING['snapshot_per_gb']
                     age_days = (datetime.now(start_time.tzinfo) - start_time).days
                     
                     findings.append({
@@ -211,9 +277,9 @@ class AWSWasteFinder:
                     
         except ClientError as e:
             if 'AuthFailure' not in str(e):
-                print(f" Error scanning Snapshots in {region}: {e}")
+                logger.warning(f"Error scanning Snapshots in {region}: {e}")
         except Exception as e:
-            pass
+            logger.debug(f"Unexpected error scanning Snapshots in {region}: {e}")
             
         return findings
     
@@ -241,15 +307,15 @@ class AWSWasteFinder:
                     'region': region,
                     'details': f"Subnet: {subnet_id}",
                     'age': 'Active (check if needed)',
-                    'monthly_cost': 32.40,
+                    'monthly_cost': self.PRICING['nat_gateway'],
                     'action': f"aws ec2 delete-nat-gateway --nat-gateway-id {nat_id} --region {region}"
                 })
                 
         except ClientError as e:
             if 'AuthFailure' not in str(e):
-                print(f" Error scanning NAT Gateways in {region}: {e}")
+                logger.warning(f"Error scanning NAT Gateways in {region}: {e}")
         except Exception as e:
-            pass
+            logger.debug(f"Unexpected error scanning NAT Gateways in {region}: {e}")
             
         return findings
     
@@ -273,11 +339,8 @@ class AWSWasteFinder:
                     days_running = (datetime.now(last_modified.tzinfo) - last_modified).days
                     
                     # Cost estimation (approximate)
-                    instance_costs = {
-                        'ml.t3.medium': 70, 'ml.t3.large': 120,
-                        'ml.m5.xlarge': 230, 'ml.p3.2xlarge': 490
-                    }
-                    monthly_cost = instance_costs.get(instance_type, 100)
+                    sagemaker_pricing = self.PRICING['sagemaker_instances']
+                    monthly_cost = sagemaker_pricing.get(instance_type, sagemaker_pricing['default'])
                     
                     findings.append({
                         'type': 'SageMaker Notebook',
@@ -291,9 +354,9 @@ class AWSWasteFinder:
                     
         except ClientError as e:
             if 'AuthFailure' not in str(e):
-                print(f"  Error scanning SageMaker in {region}: {e}")
+                logger.warning(f"Error scanning SageMaker in {region}: {e}")
         except Exception as e:
-            pass
+            logger.debug(f"Unexpected error scanning SageMaker in {region}: {e}")
             
         return findings
     
@@ -403,20 +466,20 @@ class AWSWasteFinder:
     
     def print_upsell(self):
         """Print upgrade message"""
-        print("╔═══════════════════════════════════════════════════════════════════════════╗")
-        print("║                                                                           ║")
-        print("║  💡 UPGRADE TO WASTEFINDER PRO                                            ║")
-        print("║                                                                           ║")
-        print("║                                                                           ║")
-        print("║  WasteFinder Pro includes:                                                ║")
-        print("║  Notion Dashboard (professional visual reports)                        ║")
-        print("║  AI-Powered Analysis (explains WHY waste exists)                       ║")
-        print("║                                                                           ║")
-        print("║  Pricing:                                                                 ║")
-        print("║  Pro: ₹999 ($12 USD) - For individuals & small teams                  ║")
-        print("║                                                                           ║")
-        print("║                                                                           ║")
-        print("╚═══════════════════════════════════════════════════════════════════════════╝")
+        print("╔═════════════════════════════════════════════════════════════════════════╗")
+        print("║                                                                         ║")
+        print("║  💡 UPGRADE TO WASTEFINDER PRO                                          ║")
+        print("║                                                                         ║")
+        print("║  WasteFinder Pro includes:                                              ║")
+        print("║    ✓ Notion Dashboard (professional visual reports)                     ║")
+        print("║    ✓ AI-Powered Analysis (explains WHY waste exists)                    ║")
+        print("║    ✓ Scheduled Scans & Email Notifications                              ║")
+        print("║                                                                         ║")
+        print("║  Pricing: ₹999 ($12 USD) - For individuals & small teams                ║")
+        print("║                                                                         ║")
+        print("║  Contact: engineer.vaibhavt@gmail.com                                   ║")
+        print("║                                                                         ║")
+        print("╚═════════════════════════════════════════════════════════════════════════╝")
     
     def run(self):
         """Main execution"""
@@ -443,7 +506,7 @@ class AWSWasteFinder:
         print(f"   Found {len(regions)} regions to scan\n")
         print("="*80)
         
-        for region in regions:
+        for i, region in enumerate(regions):
             print(f"Scanning {region}...", end=" ", flush=True)
             region_findings = self.scan_region(region)
             
@@ -453,6 +516,10 @@ class AWSWasteFinder:
                 self.total_waste += sum(f['monthly_cost'] for f in region_findings)
             else:
                 print("✓")
+            
+            # Rate limiting: avoid API throttling (skip delay on last region)
+            if i < len(regions) - 1:
+                time.sleep(self.SCAN_DELAY)
         
         print("="*80)
         

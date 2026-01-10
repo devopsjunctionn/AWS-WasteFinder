@@ -48,14 +48,14 @@ AWS WasteFinder automatically scans **all AWS regions** and detects:
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/aws-wastefinder.git
+git clone https://github.com/devopsjunctionn/AWS-WasteFinder.git
 cd aws-wastefinder
 
 # Install dependencies
-pip install boto3
+pip install -r requirements.txt
 
 # Run the scanner
-python wastefinder.py
+python wasteFinder.py
 ```
 
 ### Output Example
@@ -65,7 +65,7 @@ python wastefinder.py
 ║                                                           ║
 ║             AWS WASTEFINDER - FREE EDITION                ║
 ║                                                           ║
-║          Scan for Cloud Waste in 6 Categories            ║
+║          Scan for Cloud Waste in 6 Categories             ║
 ║                                                           ║
 ╚═══════════════════════════════════════════════════════════╝
 
@@ -290,7 +290,7 @@ This project is licensed under the MIT License
 
 ## Support
 
-- **Issues:** [GitHub Issues](https://github.com/yourusername/aws-wastefinder/issues)
+- **Issues:** [GitHub Issues](https://github.com/devopsjunctionn/aws-wastefinder/issues)
 
 ---
 
@@ -300,7 +300,6 @@ If this tool saved you money:
 - ⭐ Star this repository
 - 🐦 Tweet about it
 - 👨‍💻 Share with your DevOps friends
-- ☕ [Buy me a coffee](#) (optional!)
 
 ---
 
