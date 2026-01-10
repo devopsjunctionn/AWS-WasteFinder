@@ -229,16 +229,9 @@ Like what you see? **WasteFinder Pro** adds professional features:
 ✅ **Notion Dashboard** - Visual reports you can share with your team  
 ✅ **PDF Export** - Professional reports for clients/management  
 ✅ **Scheduled Scans** - Automated weekly/monthly checks  
-✅ **Email Notifications** - Get alerted when waste is detected  
+✅ **Email Notifications** - Get alerted when waste is detected
+✅ **AI Analysis** - GPT-4 explains WHY resources are wasting money 
 
-### Enterprise Features ($49 USD)
-✅ **AI Analysis** - GPT-4 explains WHY resources are wasting money  
-✅ **Slack Integration** - Real-time alerts in your Slack workspace  
-✅ **Multi-Account Support** - Scan 10+ AWS accounts from one dashboard  
-✅ **Commercial License** - Use on unlimited client projects  
-✅ **White-Label** - Rebrand with your company name  
-
-**[Send a Mail for purchase →](#engineer.vaibhavt@gmail.com)**
 
 ---
 
@@ -322,7 +315,7 @@ If this tool saved you money:
 
 <div align="center">
 
-**Made with ❤️ by Unkown**
+**Made with ❤️ by Vaibhav Thukral**
 
 *Helping developers save money one forgotten resource at a time*
 
