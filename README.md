@@ -286,6 +286,28 @@ For maximum security, create a dedicated IAM user with only the permissions Wast
 
 > **Note:** This policy is also available in [`iam-policy.json`](iam-policy.json) for easy import.
 
+### How to Create a Dedicated IAM User
+
+1. **Go to AWS Console** → IAM → Policies → **Create Policy**
+2. Click the **JSON** tab
+3. **Copy-paste** the contents of `iam-policy.json` (or the policy above)
+4. Click **Next** → Name it `WasteFinderReadOnly` → **Create Policy**
+5. Go to **Users** → **Create User** → Name: `wastefinder-scanner`
+6. Click **Attach policies directly** → Search for `WasteFinderReadOnly` → Select it
+7. **Create User** → Go to **Security Credentials** → **Create Access Key**
+8. Choose **CLI** → Copy the Access Key and Secret
+9. Run `aws configure` and paste your keys
+
+**Or use AWS CLI:**
+```bash
+# Create the policy
+aws iam create-policy --policy-name WasteFinderReadOnly --policy-document file://iam-policy.json
+
+# Create user and attach policy (replace ACCOUNT_ID with your AWS account ID)
+aws iam create-user --user-name wastefinder-scanner
+aws iam attach-user-policy --user-name wastefinder-scanner --policy-arn arn:aws:iam::ACCOUNT_ID:policy/WasteFinderReadOnly
+```
+
 ### Security Practices
 
 - **Automated Security Scanning**: CodeQL analysis on every push
