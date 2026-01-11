@@ -5,26 +5,20 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 
-**Stop paying for cloud resources you forgot to delete.**
+# AWS WasteFinder
 
-AWS WasteFinder scans your entire AWS account across all regions and finds 6 types of waste that silently drain your budget every month.
+A read-only CLI that scans all AWS regions and reports unused AWS resources.
 
-> Featured as #2 trending post on r/devops | 20+ downloads in 24 hours
+Detects:
+- Unattached EBS volumes
+- Unused Elastic IPs
+- Idle load balancers
+- Old snapshots
+- NAT Gateways
+- Running SageMaker notebooks
 
----
-
-## The Problem
-
-Every month, companies waste **27% of their cloud spending** on forgotten resources:
-
-- **Orphaned EBS volumes** from deleted servers → $50-500/month
-- **Unused Elastic IPs** (AWS charges $3.60/month each since Feb 2024)
-- **Idle Load Balancers** with no traffic → $18-25/month each
-- **Old snapshots** from projects abandoned months ago → $20-200/month
-- **NAT Gateways** nobody's using → $32/month each
-- **SageMaker notebooks** left running after testing → $70-500/month
-
-**AWS Cost Explorer shows you spent money. WasteFinder shows you WHERE to save it.**
+The tool does **not** delete anything.  
+It prints AWS CLI commands so you can review and run them yourself.
 
 ---
 
@@ -32,14 +26,14 @@ Every month, companies waste **27% of their cloud spending** on forgotten resour
 
 AWS WasteFinder automatically scans **all AWS regions** and detects:
 
-| Waste Type | What It Finds | Typical Savings |
-|------------|---------------|-----------------|
-| **EBS Volumes** | Orphaned volumes (not attached to instances) | $50-500/month |
-| **Elastic IPs** | Unattached public IPs | $3.60/month each |
-| **Load Balancers** | Load balancers with no healthy targets | $18-25/month each |
-| **Snapshots** | Old snapshots from deleted volumes (>90 days) | $20-200/month |
-| **NAT Gateways** | Idle network gateways | $32/month each |
-| **SageMaker** | Forgotten ML notebook instances | $70-500/month each |
+| Waste Type | What It Finds |
+|------------|---------------|
+| **EBS Volumes** | Orphaned volumes (not attached to instances) |
+| **Elastic IPs** | Unattached public IPs |
+| **Load Balancers** | Load balancers with no healthy targets |
+| **Snapshots** | Old snapshots from deleted volumes (>90 days) |
+| **NAT Gateways** | Idle network gateways |
+| **SageMaker** | Forgotten ML notebook instances |
 
 ---
 
@@ -64,6 +58,15 @@ pip install -r requirements.txt
 # Run the scanner
 python wasteFinder.py
 ```
+## Dry Run & Safety
+
+AWS WasteFinder is **read-only**.
+
+It only calls AWS `Describe*` and `List*` APIs.
+It does **not** create, modify, or delete any AWS resources.
+
+The tool prints AWS CLI delete commands so you can review and run them manually.
+
 
 ### Output Example
 
@@ -164,16 +167,13 @@ set AWS_SECRET_ACCESS_KEY=your-secret-key
 ### Load Balancers
 - Checks Application and Network Load Balancers
 - Identifies load balancers with no healthy targets
-- Typical cost: $18-25/month per idle LB
 
 ### EBS Snapshots
 - Finds snapshots from deleted volumes
 - Flags snapshots older than 90 days
-- Cost: $0.05 per GB/month
 
 ### NAT Gateways
 - Lists all active NAT Gateways
-- Cost: $32.40/month + data transfer charges
 - Note: Manual verification needed (check CloudWatch for actual usage)
 
 ### SageMaker Notebooks
@@ -183,29 +183,12 @@ set AWS_SECRET_ACCESS_KEY=your-secret-key
 
 ---
 
-## Use Cases
-
-### For Startups
-- **Problem:** AWS bill jumped from $2K to $5K unexpectedly
-- **Solution:** Run WasteFinder monthly to catch forgotten resources
-- **Result:** Save $500-2000/month
-
-### For DevOps Engineers
-- **Problem:** Boss asks "Why is our bill so high?"
-- **Solution:** Run WasteFinder, generate report, show findings
-- **Result:** Look like a hero by finding $2K in waste
-
-### For Freelance CTOs
-- **Problem:** Managing AWS for 5-10 clients manually
-- **Solution:** Run WasteFinder on each client account monthly
-- **Result:** Save each client $500-1500/month, bill them for "cost optimization"
-
-### For Agencies
-- **Problem:** Client complains about high AWS costs
-- **Solution:** Use WasteFinder to audit their account
-- **Result:** Show quick wins, increase trust, upsell management services
-
----
+## Limitations
+- **NAT Gateways**: Lists all active gateways. Check CloudWatch metrics to confirm they're actually idle before deleting.
+- **Pricing estimates**: Actual costs may vary by region.
+- **Snapshots**: Only flags snapshots older than 90 days from deleted volumes.
+- **Services covered**: Currently scans 6 resource types. Does not cover RDS, Lambda, S3, or other services.
+- **Single account**: Scans one AWS account at a time. For multi-account, run separately per account.
 
 ## How Is This Different?
 
@@ -217,14 +200,6 @@ set AWS_SECRET_ACCESS_KEY=your-secret-key
 | Multi-region scan | Manual (20+ clicks) | Automatic |
 | Actionable commands | ❌ | ✅ |
 | Cost | Free (basic) / $0.01/API call | Free |
-
-### vs. Enterprise Tools (CloudHealth, nOps, Vantage)
-| Feature | Enterprise Tools | WasteFinder |
-|---------|------------------|-------------|
-| Waste detection | ✅ | ✅ |
-| Price | $5,000-50,000/year | Free |
-| Setup complexity | Hours + sales calls | 5 minutes |
-| Target audience | Large enterprises | Startups, freelancers |
 
 ---
 
@@ -342,7 +317,7 @@ aws iam attach-user-policy --user-name wastefinder-scanner --policy-arn arn:aws:
 **Fix:** Check that you're scanning the correct AWS account. Run `aws sts get-caller-identity` to verify.
 
 ### Script is slow
-**Normal:** Scanning 17 regions takes 2-3 minutes. Enterprise tools take similar time.
+**Normal:** Scanning 17 regions takes 2-3 minutes.
 
 ---
 
@@ -352,27 +327,15 @@ aws iam attach-user-policy --user-name wastefinder-scanner --policy-arn arn:aws:
 
 ---
 
-## 🌟 Show Your Support
-
-If this tool saved you money:
-- ⭐ Star this repository
-- 🐦 Tweet about it
-- 👨‍💻 Share with your DevOps friends
-
----
-
 ## 📚 Related Resources
 
 - [AWS Cost Optimization Guide](https://aws.amazon.com/pricing/cost-optimization/)
 - [AWS Trusted Advisor](https://aws.amazon.com/premiumsupport/technology/trusted-advisor/)
-- [r/aws Subreddit](https://reddit.com/r/aws)
 - [AWS Cost Optimization Blog Posts](https://aws.amazon.com/blogs/aws-cost-management/)
 
 ---
 
 <div align="center">
-
-**Made with ❤️ by Vaibhav Thukral**
 
 *Helping developers save money one forgotten resource at a time*
 
