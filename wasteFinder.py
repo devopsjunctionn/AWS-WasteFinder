@@ -420,7 +420,7 @@ class AWSWasteFinder:
         self.save_report()
         
         # Upsell message
-        #self.print_upsell()
+        # self.print_upsell()
     
     def save_report(self):
         """Save detailed report to file"""
