@@ -9,6 +9,8 @@
 
 AWS WasteFinder scans your entire AWS account across all regions and finds 6 types of waste that silently drain your budget every month.
 
+> Featured as #2 trending post on r/devops | 20+ downloads in 24 hours
+
 ---
 
 ## The Problem
@@ -32,12 +34,12 @@ AWS WasteFinder automatically scans **all AWS regions** and detects:
 
 | Waste Type | What It Finds | Typical Savings |
 |------------|---------------|-----------------|
-| 🗄️ **EBS Volumes** | Orphaned volumes (not attached to instances) | $50-500/month |
-| 🌐 **Elastic IPs** | Unattached public IPs | $3.60/month each |
-| ⚖️ **Load Balancers** | Load balancers with no healthy targets | $18-25/month each |
-| 💾 **Snapshots** | Old snapshots from deleted volumes (>90 days) | $20-200/month |
-| 🔌 **NAT Gateways** | Idle network gateways | $32/month each |
-| 🤖 **SageMaker** | Forgotten ML notebook instances | $70-500/month each |
+| **EBS Volumes** | Orphaned volumes (not attached to instances) | $50-500/month |
+| **Elastic IPs** | Unattached public IPs | $3.60/month each |
+| **Load Balancers** | Load balancers with no healthy targets | $18-25/month each |
+| **Snapshots** | Old snapshots from deleted volumes (>90 days) | $20-200/month |
+| **NAT Gateways** | Idle network gateways | $32/month each |
+| **SageMaker** | Forgotten ML notebook instances | $70-500/month each |
 
 ---
 
