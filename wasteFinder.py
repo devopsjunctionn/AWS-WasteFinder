@@ -66,9 +66,9 @@ class AWSWasteFinder:
         banner = """
 ╔═══════════════════════════════════════════════════════════╗
 ║                                                           ║
-║             AWS WASTEFINDER - FREE EDITION                ║
+║                 AWS WASTEFINDER                           ║
 ║                                                           ║
-║          Scan for Cloud Waste in 6 Categories            ║
+║          Scan for Cloud Waste in 6 Categories             ║
 ║                                                           ║
 ╚═══════════════════════════════════════════════════════════╝
 """
@@ -381,7 +381,7 @@ class AWSWasteFinder:
             print("="*80)
             return
         
-        print("\n🚨 WASTE DETECTED - Resources Costing You Money\n")
+        print("\n WASTE DETECTED - Resources Costing You Money\n")
         print("="*80 + "\n")
         
         # Group by type
@@ -403,7 +403,7 @@ class AWSWasteFinder:
                 print(f"  Region:      {item['region']}")
                 print(f"  Details:     {item['details']}")
                 print(f"  Status:      {item['age']}")
-                print(f"  💰 Cost:     ${item['monthly_cost']:.2f}/month (${item['monthly_cost']*12:.2f}/year)")
+                print(f"  Cost:     ${item['monthly_cost']:.2f}/month (${item['monthly_cost']*12:.2f}/year)")
                 print(f"  Action:      {item['action']}")
                 print(f"  {'-'*76}")
         
@@ -420,7 +420,7 @@ class AWSWasteFinder:
         self.save_report()
         
         # Upsell message
-        self.print_upsell()
+        #self.print_upsell()
     
     def save_report(self):
         """Save detailed report to file"""
@@ -468,7 +468,7 @@ class AWSWasteFinder:
         """Print upgrade message"""
         print("╔═════════════════════════════════════════════════════════════════════════╗")
         print("║                                                                         ║")
-        print("║  💡 UPGRADE TO WASTEFINDER PRO                                          ║")
+        print("║     UPGRADE TO WASTEFINDER PRO                                          ║")
         print("║                                                                         ║")
         print("║  WasteFinder Pro includes:                                              ║")
         print("║    ✓ Notion Dashboard (professional visual reports)                     ║")
@@ -511,7 +511,7 @@ class AWSWasteFinder:
             region_findings = self.scan_region(region)
             
             if region_findings:
-                print(f"⚠️  Found {len(region_findings)} waste items")
+                print(f" Found {len(region_findings)} waste items")
                 self.findings.extend(region_findings)
                 self.total_waste += sum(f['monthly_cost'] for f in region_findings)
             else:
