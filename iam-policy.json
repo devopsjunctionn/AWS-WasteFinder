@@ -15,6 +15,7 @@
                 "elasticloadbalancing:DescribeTargetHealth",
                 "sagemaker:ListNotebookInstances",
                 "sagemaker:DescribeNotebookInstance",
+                "logs:DescribeLogGroups",
                 "sts:GetCallerIdentity"
             ],
             "Resource": "*"

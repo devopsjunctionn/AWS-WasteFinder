@@ -8,7 +8,7 @@ GitHub: https://github.com/devopsjunctionn/AWS-WasteFinder
 License: MIT
 """
 
-__version__ = "1.0.1"
+__version__ = "1.1.0"
 
 import boto3
 import logging
@@ -52,7 +52,8 @@ class AWSWasteFinder:
             'ml.t3.medium': 70, 'ml.t3.large': 120,
             'ml.m5.xlarge': 230, 'ml.p3.2xlarge': 490,
             'default': 100
-        }
+        },
+        'cloudwatch_logs_per_gb': 0.03  # Storage per GB/month
     }
     
     # Rate limiting: seconds to wait between region scans
@@ -68,7 +69,7 @@ class AWSWasteFinder:
 ║                                                           ║
 ║                 AWS WASTEFINDER                           ║
 ║                                                           ║
-║          Scan for Cloud Waste in 6 Categories             ║
+║          Scan for Cloud Waste in 7 Categories             ║
 ║                                                           ║
 ╚═══════════════════════════════════════════════════════════╝
 """
@@ -360,6 +361,46 @@ class AWSWasteFinder:
             
         return findings
     
+    def scan_cloudwatch_logs(self, region):
+        """
+        WASTE TYPE 7: CloudWatch Log Groups with Infinite Retention
+        Log groups without retention policy accumulate storage costs forever
+        Cost: $0.03 per GB/month
+        """
+        findings = []
+        try:
+            logs = boto3.client('logs', region_name=region)
+            paginator = logs.get_paginator('describe_log_groups')
+            
+            for page in paginator.paginate():
+                for group in page['logGroups']:
+                    # If retentionInDays is not set, retention is infinite
+                    if 'retentionInDays' not in group:
+                        group_name = group['logGroupName']
+                        stored_bytes = group.get('storedBytes', 0)
+                        stored_gb = stored_bytes / (1024 ** 3)
+                        
+                        # Only flag if there's actual data stored
+                        if stored_bytes > 0:
+                            monthly_cost = stored_gb * self.PRICING['cloudwatch_logs_per_gb']
+                            
+                            findings.append({
+                                'type': 'CloudWatch Logs',
+                                'id': group_name,
+                                'region': region,
+                                'details': f"{stored_gb:.2f} GB stored (infinite retention)",
+                                'age': 'No retention policy',
+                                'monthly_cost': monthly_cost,
+                                'action': f"aws logs put-retention-policy --log-group-name '{group_name}' --retention-in-days 30 --region {region}"
+                            })
+        except ClientError as e:
+            if 'AuthFailure' not in str(e) and 'AccessDenied' not in str(e):
+                logger.warning(f"Error scanning CloudWatch Logs in {region}: {e}")
+        except Exception as e:
+            logger.debug(f"Unexpected error scanning CloudWatch Logs in {region}: {e}")
+            
+        return findings
+    
     def scan_region(self, region):
         """Scan all waste types in a single region"""
         findings = []
@@ -369,6 +410,7 @@ class AWSWasteFinder:
         findings.extend(self.scan_snapshots(region))
         findings.extend(self.scan_nat_gateways(region))
         findings.extend(self.scan_sagemaker(region))
+        findings.extend(self.scan_cloudwatch_logs(region))
         return findings
     
     def generate_report(self):
@@ -462,7 +504,7 @@ class AWSWasteFinder:
                 f.write(f"Monthly Waste: ${self.total_waste:.2f}\n")
                 f.write(f"Yearly Waste: ${self.total_waste * 12:.2f}\n")
         
-        print(f"  📄 Detailed report saved to: {filename}\n")
+        print(f" Detailed report saved to: {filename}\n")
     
     def print_upsell(self):
         """Print upgrade message"""
@@ -486,7 +528,7 @@ class AWSWasteFinder:
         self.print_banner()
         
         print("Starting comprehensive waste scan...")
-        print("   This will check all AWS regions for 6 types of waste.\n")
+        print("   This will check all AWS regions for 7 types of waste.\n")
         
         # Verify AWS credentials
         try:

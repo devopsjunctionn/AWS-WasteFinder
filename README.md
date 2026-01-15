@@ -15,6 +15,7 @@ Detects:
 - Old snapshots
 - NAT Gateways
 - Running SageMaker notebooks
+- CloudWatch logs with infinite retention
 
 The tool does **not** delete anything.  
 It prints AWS CLI commands so you can review and run them yourself.
@@ -33,6 +34,7 @@ AWS WasteFinder automatically scans **all AWS regions** and detects:
 | **Snapshots** | Old snapshots from deleted volumes (>90 days) |
 | **NAT Gateways** | Idle network gateways |
 | **SageMaker** | Forgotten ML notebook instances |
+| **CloudWatch Logs** | Log groups with infinite retention |
 
 ---
 
@@ -180,6 +182,11 @@ set AWS_SECRET_ACCESS_KEY=your-secret-key
 - Shows instance type and running duration
 - Cost varies: $70-500/month depending on instance type
 
+### CloudWatch Logs
+- Finds log groups with no retention policy (infinite retention)
+- Shows stored data size and estimated cost
+- Cost: $0.03/GB/month for storage
+
 ---
 
 ## Limitations
@@ -213,7 +220,7 @@ Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for:
 
 ---
 
-## 📝 License
+## License
 
 This project is licensed under the MIT License
 
@@ -221,7 +228,7 @@ This project is licensed under the MIT License
 
 ---
 
-## 🔒 Security
+## Security
 
 This tool is **100% read-only** and never modifies or deletes any AWS resources.
 
