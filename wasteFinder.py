@@ -8,7 +8,7 @@ GitHub: https://github.com/devopsjunctionn/AWS-WasteFinder
 License: MIT
 """
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 import boto3
 import logging
@@ -53,7 +53,15 @@ class AWSWasteFinder:
             'ml.m5.xlarge': 230, 'ml.p3.2xlarge': 490,
             'default': 100
         },
-        'cloudwatch_logs_per_gb': 0.03  # Storage per GB/month
+        'cloudwatch_logs_per_gb': 0.03,  # Storage per GB/month
+        'rds_instances': {
+            # Monthly costs for common RDS instance types (single-AZ, MySQL)
+            'db.t3.micro': 12.41, 'db.t3.small': 24.82, 'db.t3.medium': 49.64,
+            'db.t3.large': 99.28, 'db.t3.xlarge': 198.56,
+            'db.r5.large': 175.20, 'db.r5.xlarge': 350.40,
+            'db.m5.large': 124.10, 'db.m5.xlarge': 248.20,
+            'default': 100
+        }
     }
     
     # Rate limiting: seconds to wait between region scans
@@ -69,7 +77,7 @@ class AWSWasteFinder:
 ║                                                           ║
 ║                 AWS WASTEFINDER                           ║
 ║                                                           ║
-║          Scan for Cloud Waste in 7 Categories             ║
+║          Scan for Cloud Waste in 8 Categories             ║
 ║                                                           ║
 ╚═══════════════════════════════════════════════════════════╝
 """
@@ -401,6 +409,75 @@ class AWSWasteFinder:
             
         return findings
     
+    def scan_rds_instances(self, region):
+        """
+        WASTE TYPE 8: Idle RDS Instances
+        RDS databases with zero connections for 7+ days
+        Cost: $12-350+/month depending on instance type
+        """
+        findings = []
+        try:
+            rds = boto3.client('rds', region_name=region)
+            cloudwatch = boto3.client('cloudwatch', region_name=region)
+            
+            # Get all RDS instances
+            instances = rds.describe_db_instances()['DBInstances']
+            
+            for db in instances:
+                db_id = db['DBInstanceIdentifier']
+                db_status = db['DBInstanceStatus']
+                instance_class = db['DBInstanceClass']
+                engine = db['Engine']
+                
+                # Only check running instances
+                if db_status != 'available':
+                    continue
+                
+                # Check CloudWatch for database connections in last 7 days
+                end_time = datetime.now(timezone.utc)
+                start_time = end_time - timedelta(days=7)
+                
+                response = cloudwatch.get_metric_statistics(
+                    Namespace='AWS/RDS',
+                    MetricName='DatabaseConnections',
+                    Dimensions=[{'Name': 'DBInstanceIdentifier', 'Value': db_id}],
+                    StartTime=start_time,
+                    EndTime=end_time,
+                    Period=86400,  # 1 day
+                    Statistics=['Maximum']
+                )
+                
+                # Check if there were any connections
+                datapoints = response.get('Datapoints', [])
+                max_connections = max([dp['Maximum'] for dp in datapoints], default=0)
+                
+                if max_connections == 0:
+                    # No connections in 7 days - this is idle!
+                    rds_pricing = self.PRICING['rds_instances']
+                    monthly_cost = rds_pricing.get(instance_class, rds_pricing['default'])
+                    
+                    # Check if Multi-AZ (doubles the cost)
+                    if db.get('MultiAZ', False):
+                        monthly_cost *= 2
+                    
+                    findings.append({
+                        'type': 'RDS Instance',
+                        'id': db_id,
+                        'region': region,
+                        'details': f"{instance_class} ({engine}){' Multi-AZ' if db.get('MultiAZ') else ''}",
+                        'age': '0 connections in 7 days',
+                        'monthly_cost': monthly_cost,
+                        'action': f"aws rds stop-db-instance --db-instance-identifier {db_id} --region {region}"
+                    })
+                    
+        except ClientError as e:
+            if 'AuthFailure' not in str(e) and 'AccessDenied' not in str(e):
+                logger.warning(f"Error scanning RDS in {region}: {e}")
+        except Exception as e:
+            logger.debug(f"Unexpected error scanning RDS in {region}: {e}")
+            
+        return findings
+    
     def scan_region(self, region):
         """Scan all waste types in a single region"""
         findings = []
@@ -411,6 +488,7 @@ class AWSWasteFinder:
         findings.extend(self.scan_nat_gateways(region))
         findings.extend(self.scan_sagemaker(region))
         findings.extend(self.scan_cloudwatch_logs(region))
+        findings.extend(self.scan_rds_instances(region))
         return findings
     
     def generate_report(self):

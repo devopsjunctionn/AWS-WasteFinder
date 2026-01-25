@@ -16,6 +16,7 @@ Detects:
 - NAT Gateways
 - Running SageMaker notebooks
 - CloudWatch logs with infinite retention
+- **Idle RDS databases** (0 connections in 7 days)
 
 The tool does **not** delete anything.  
 It prints AWS CLI commands so you can review and run them yourself.
@@ -35,6 +36,7 @@ AWS WasteFinder automatically scans **all AWS regions** and detects:
 | **NAT Gateways** | Idle network gateways |
 | **SageMaker** | Forgotten ML notebook instances |
 | **CloudWatch Logs** | Log groups with infinite retention |
+| **RDS Instances** | Databases with 0 connections in 7 days |
 
 ---
 
