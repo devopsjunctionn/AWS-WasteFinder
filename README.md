@@ -78,12 +78,12 @@ The tool prints AWS CLI delete commands so you can review and run them manually.
 ║                                                           ║
 ║                 AWS WASTEFINDER                           ║
 ║                                                           ║
-║          Scan for Cloud Waste in 6 Categories             ║
+║          Scan for Cloud Waste in 8 Categories             ║
 ║                                                           ║
 ╚═══════════════════════════════════════════════════════════╝
 
 Starting comprehensive waste scan...
-   This will check all AWS regions for 6 types of waste.
+   This will check all AWS regions for 8 types of waste.
 
 Connected to AWS Account: 123456789012
 
