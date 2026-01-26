@@ -288,3 +288,92 @@ class TestIntegration:
         # Should NOT find log groups that have retention set
         infinite_retention = [f for f in findings if f['id'] == '/aws/test/with-retention']
         assert len(infinite_retention) == 0
+
+    @mock_aws
+    def test_scan_rds_finds_idle_instances(self):
+        """Test detection of idle RDS instances with 0 connections"""
+        rds = boto3.client('rds', region_name='us-east-1')
+        
+        # Create an RDS instance
+        rds.create_db_instance(
+            DBInstanceIdentifier='test-idle-db',
+            DBInstanceClass='db.t3.micro',
+            Engine='mysql',
+            MasterUsername='admin',
+            MasterUserPassword='password123'
+        )
+        
+        scanner = AWSWasteFinder()
+        
+        # Mock CloudWatch to return 0 connections
+        with patch('boto3.client') as mock_boto:
+            # Create a mock CloudWatch client that returns 0 connections
+            mock_cw = MagicMock()
+            mock_cw.get_metric_statistics.return_value = {
+                'Datapoints': [{'Maximum': 0}]
+            }
+            
+            # Create a mock RDS client with the instance
+            mock_rds = MagicMock()
+            mock_rds.describe_db_instances.return_value = {
+                'DBInstances': [{
+                    'DBInstanceIdentifier': 'test-idle-db',
+                    'DBInstanceStatus': 'available',
+                    'DBInstanceClass': 'db.t3.micro',
+                    'Engine': 'mysql',
+                    'MultiAZ': False
+                }]
+            }
+            
+            def get_client(service, region_name=None):
+                if service == 'cloudwatch':
+                    return mock_cw
+                elif service == 'rds':
+                    return mock_rds
+                return MagicMock()
+            
+            mock_boto.side_effect = get_client
+            
+            findings = scanner.scan_rds_instances('us-east-1')
+            
+            # Should find the idle RDS instance (0 connections)
+            assert len(findings) == 1
+            assert findings[0]['type'] == 'RDS Instance'
+            assert findings[0]['id'] == 'test-idle-db'
+
+    @mock_aws
+    def test_scan_rds_ignores_active_instances(self):
+        """Test that RDS instances with connections are not flagged"""
+        scanner = AWSWasteFinder()
+        
+        # Mock CloudWatch to return active connections
+        with patch('boto3.client') as mock_boto:
+            mock_cw = MagicMock()
+            mock_cw.get_metric_statistics.return_value = {
+                'Datapoints': [{'Maximum': 5}]  # Has connections
+            }
+            
+            mock_rds = MagicMock()
+            mock_rds.describe_db_instances.return_value = {
+                'DBInstances': [{
+                    'DBInstanceIdentifier': 'active-db',
+                    'DBInstanceStatus': 'available',
+                    'DBInstanceClass': 'db.t3.micro',
+                    'Engine': 'mysql',
+                    'MultiAZ': False
+                }]
+            }
+            
+            def get_client(service, region_name=None):
+                if service == 'cloudwatch':
+                    return mock_cw
+                elif service == 'rds':
+                    return mock_rds
+                return MagicMock()
+            
+            mock_boto.side_effect = get_client
+            
+            findings = scanner.scan_rds_instances('us-east-1')
+            
+            # Should NOT find active RDS instances
+            assert len(findings) == 0
