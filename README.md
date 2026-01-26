@@ -192,11 +192,11 @@ set AWS_SECRET_ACCESS_KEY=your-secret-key
 ---
 
 ## Limitations
-- **NAT Gateways**: Lists all active gateways. Check CloudWatch metrics to confirm they're actually idle before deleting.
-- **Pricing estimates**: Actual costs may vary by region.
-- **Snapshots**: Only flags snapshots older than 90 days from deleted volumes.
+- **Pricing estimates**: Actual costs may vary by region (estimates based on US East).
+- **Snapshots**: Only flags snapshots older than 90 days from deleted volumes. These may be your only backup - verify before deleting.
 - **CloudWatch Logs**: AWS updates `storedBytes` with ~24 hour delay. Cost shows $0.00 for newly created log groups until AWS updates the storage size.
-- **Services covered**: Currently scans 7 resource types. Does not cover RDS, Lambda, S3, or other services.
+- **RDS**: Read Replicas are skipped (they may have 0 connections intentionally).
+- **Services covered**: Currently scans 8 resource types. Does not cover Lambda, S3, or other services.
 - **Single account**: Scans one AWS account at a time. For multi-account, run separately per account.
 
 ## How Is This Different?

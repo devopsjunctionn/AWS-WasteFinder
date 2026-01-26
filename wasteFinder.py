@@ -8,7 +8,7 @@ GitHub: https://github.com/devopsjunctionn/AWS-WasteFinder
 License: MIT
 """
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 import boto3
 import logging
@@ -16,6 +16,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from botocore.exceptions import ClientError
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Configure logging - set to DEBUG for troubleshooting
 logging.basicConfig(
@@ -102,29 +103,30 @@ class AWSWasteFinder:
         findings = []
         try:
             ec2 = boto3.client('ec2', region_name=region)
-            volumes = ec2.describe_volumes()['Volumes']
+            paginator = ec2.get_paginator('describe_volumes')
             
-            for vol in volumes:
-                if vol['State'] == 'available':  # Not attached to anything
-                    vol_id = vol['VolumeId']
-                    size_gb = vol['Size']
-                    vol_type = vol['VolumeType']
-                    create_time = vol['CreateTime']
-                    
-                    # Cost calculation based on volume type
-                    monthly_cost = size_gb * self.PRICING['ebs_per_gb'].get(vol_type, 0.10)
-                    
-                    days_orphaned = (datetime.now(create_time.tzinfo) - create_time).days
-                    
-                    findings.append({
-                        'type': 'EBS Volume',
-                        'id': vol_id,
-                        'region': region,
-                        'details': f"{size_gb} GB ({vol_type})",
-                        'age': f"{days_orphaned} days orphaned",
-                        'monthly_cost': monthly_cost,
-                        'action': f"aws ec2 delete-volume --volume-id {vol_id} --region {region}"
-                    })
+            for page in paginator.paginate():
+                for vol in page['Volumes']:
+                    if vol['State'] == 'available':  # Not attached to anything
+                        vol_id = vol['VolumeId']
+                        size_gb = vol['Size']
+                        vol_type = vol['VolumeType']
+                        create_time = vol['CreateTime']
+                        
+                        # Cost calculation based on volume type
+                        monthly_cost = size_gb * self.PRICING['ebs_per_gb'].get(vol_type, 0.10)
+                        
+                        days_orphaned = (datetime.now(create_time.tzinfo) - create_time).days
+                        
+                        findings.append({
+                            'type': 'EBS Volume',
+                            'id': vol_id,
+                            'region': region,
+                            'details': f"{size_gb} GB ({vol_type})",
+                            'age': f"{days_orphaned} days orphaned",
+                            'monthly_cost': monthly_cost,
+                            'action': f"aws ec2 delete-volume --volume-id {vol_id} --region {region}"
+                        })
         except ClientError as e:
             if 'AuthFailure' not in str(e):
                 logger.warning(f"Error scanning EBS in {region}: {e}")
@@ -254,35 +256,38 @@ class AWSWasteFinder:
         try:
             ec2 = boto3.client('ec2', region_name=region)
             
-            # Get snapshots owned by this account
-            snapshots = ec2.describe_snapshots(OwnerIds=['self'])['Snapshots']
-            
-            # Get all current volume IDs
-            volumes = ec2.describe_volumes()['Volumes']
-            current_volume_ids = {v['VolumeId'] for v in volumes}
+            # Get all current volume IDs using pagination
+            current_volume_ids = set()
+            vol_paginator = ec2.get_paginator('describe_volumes')
+            for page in vol_paginator.paginate():
+                for v in page['Volumes']:
+                    current_volume_ids.add(v['VolumeId'])
             
             ninety_days_ago = datetime.now(timezone.utc) - timedelta(days=90)
             
-            for snap in snapshots:
-                snap_id = snap['SnapshotId']
-                volume_id = snap.get('VolumeId', 'unknown')
-                size_gb = snap['VolumeSize']
-                start_time = snap['StartTime']
-                
-                # Flag if snapshot is from a deleted volume AND is older than 90 days
-                if volume_id not in current_volume_ids and start_time < ninety_days_ago:
-                    monthly_cost = size_gb * self.PRICING['snapshot_per_gb']
-                    age_days = (datetime.now(start_time.tzinfo) - start_time).days
+            # Get snapshots owned by this account using pagination
+            snap_paginator = ec2.get_paginator('describe_snapshots')
+            for page in snap_paginator.paginate(OwnerIds=['self']):
+                for snap in page['Snapshots']:
+                    snap_id = snap['SnapshotId']
+                    volume_id = snap.get('VolumeId', 'unknown')
+                    size_gb = snap['VolumeSize']
+                    start_time = snap['StartTime']
                     
-                    findings.append({
-                        'type': 'EBS Snapshot',
-                        'id': snap_id,
-                        'region': region,
-                        'details': f"{size_gb} GB from deleted volume",
-                        'age': f"{age_days} days old",
-                        'monthly_cost': monthly_cost,
-                        'action': f"aws ec2 delete-snapshot --snapshot-id {snap_id} --region {region}"
-                    })
+                    # Flag if snapshot is from a deleted volume AND is older than 90 days
+                    if volume_id not in current_volume_ids and start_time < ninety_days_ago:
+                        monthly_cost = size_gb * self.PRICING['snapshot_per_gb']
+                        age_days = (datetime.now(start_time.tzinfo) - start_time).days
+                        
+                        findings.append({
+                            'type': 'EBS Snapshot',
+                            'id': snap_id,
+                            'region': region,
+                            'details': f"{size_gb} GB from deleted volume (WARNING: may be only backup)",
+                            'age': f"{age_days} days old",
+                            'monthly_cost': monthly_cost,
+                            'action': f"aws ec2 delete-snapshot --snapshot-id {snap_id} --region {region}"
+                        })
                     
         except ClientError as e:
             if 'AuthFailure' not in str(e):
@@ -301,24 +306,55 @@ class AWSWasteFinder:
         findings = []
         try:
             ec2 = boto3.client('ec2', region_name=region)
+            cloudwatch = boto3.client('cloudwatch', region_name=region)
+            
             nat_gateways = ec2.describe_nat_gateways(
                 Filters=[{'Name': 'state', 'Values': ['available']}]
             )['NatGateways']
             
-            # For free version, we flag ALL NAT gateways (paid version would check CloudWatch metrics)
+            end_time = datetime.now(timezone.utc)
+            start_time = end_time - timedelta(days=7)
+            
             for nat in nat_gateways:
                 nat_id = nat['NatGatewayId']
                 subnet_id = nat['SubnetId']
                 
-                findings.append({
-                    'type': 'NAT Gateway',
-                    'id': nat_id,
-                    'region': region,
-                    'details': f"Subnet: {subnet_id}",
-                    'age': 'Active (check if needed)',
-                    'monthly_cost': self.PRICING['nat_gateway'],
-                    'action': f"aws ec2 delete-nat-gateway --nat-gateway-id {nat_id} --region {region}"
-                })
+                # Check BOTH outbound AND inbound traffic
+                # NAT is only idle if both are zero
+                bytes_out_response = cloudwatch.get_metric_statistics(
+                    Namespace='AWS/NATGateway',
+                    MetricName='BytesOutToDestination',
+                    Dimensions=[{'Name': 'NatGatewayId', 'Value': nat_id}],
+                    StartTime=start_time,
+                    EndTime=end_time,
+                    Period=86400,  # 1 day
+                    Statistics=['Sum']
+                )
+                
+                bytes_in_response = cloudwatch.get_metric_statistics(
+                    Namespace='AWS/NATGateway',
+                    MetricName='BytesInFromDestination',
+                    Dimensions=[{'Name': 'NatGatewayId', 'Value': nat_id}],
+                    StartTime=start_time,
+                    EndTime=end_time,
+                    Period=86400,  # 1 day
+                    Statistics=['Sum']
+                )
+                
+                bytes_out = sum([dp['Sum'] for dp in bytes_out_response.get('Datapoints', [])], 0)
+                bytes_in = sum([dp['Sum'] for dp in bytes_in_response.get('Datapoints', [])], 0)
+                
+                # Only flag if BOTH inbound and outbound are 0 (truly idle)
+                if bytes_out == 0 and bytes_in == 0:
+                    findings.append({
+                        'type': 'NAT Gateway',
+                        'id': nat_id,
+                        'region': region,
+                        'details': f"Subnet: {subnet_id} (0 bytes in/out in 7 days)",
+                        'age': 'Idle - no traffic',
+                        'monthly_cost': self.PRICING['nat_gateway'],
+                        'action': f"aws ec2 delete-nat-gateway --nat-gateway-id {nat_id} --region {region}"
+                    })
                 
         except ClientError as e:
             if 'AuthFailure' not in str(e):
@@ -420,55 +456,60 @@ class AWSWasteFinder:
             rds = boto3.client('rds', region_name=region)
             cloudwatch = boto3.client('cloudwatch', region_name=region)
             
-            # Get all RDS instances
-            instances = rds.describe_db_instances()['DBInstances']
+            # Get all RDS instances using pagination
+            paginator = rds.get_paginator('describe_db_instances')
             
-            for db in instances:
-                db_id = db['DBInstanceIdentifier']
-                db_status = db['DBInstanceStatus']
-                instance_class = db['DBInstanceClass']
-                engine = db['Engine']
-                
-                # Only check running instances
-                if db_status != 'available':
-                    continue
-                
-                # Check CloudWatch for database connections in last 7 days
-                end_time = datetime.now(timezone.utc)
-                start_time = end_time - timedelta(days=7)
-                
-                response = cloudwatch.get_metric_statistics(
-                    Namespace='AWS/RDS',
-                    MetricName='DatabaseConnections',
-                    Dimensions=[{'Name': 'DBInstanceIdentifier', 'Value': db_id}],
-                    StartTime=start_time,
-                    EndTime=end_time,
-                    Period=86400,  # 1 day
-                    Statistics=['Maximum']
-                )
-                
-                # Check if there were any connections
-                datapoints = response.get('Datapoints', [])
-                max_connections = max([dp['Maximum'] for dp in datapoints], default=0)
-                
-                if max_connections == 0:
-                    # No connections in 7 days - this is idle!
-                    rds_pricing = self.PRICING['rds_instances']
-                    monthly_cost = rds_pricing.get(instance_class, rds_pricing['default'])
+            end_time = datetime.now(timezone.utc)
+            start_time = end_time - timedelta(days=7)
+            
+            for page in paginator.paginate():
+                for db in page['DBInstances']:
+                    db_id = db['DBInstanceIdentifier']
+                    db_status = db['DBInstanceStatus']
+                    instance_class = db['DBInstanceClass']
+                    engine = db['Engine']
                     
-                    # Check if Multi-AZ (doubles the cost)
-                    if db.get('MultiAZ', False):
-                        monthly_cost *= 2
+                    # Only check running instances
+                    if db_status != 'available':
+                        continue
                     
-                    findings.append({
-                        'type': 'RDS Instance',
-                        'id': db_id,
-                        'region': region,
-                        'details': f"{instance_class} ({engine}){' Multi-AZ' if db.get('MultiAZ') else ''}",
-                        'age': '0 connections in 7 days',
-                        'monthly_cost': monthly_cost,
-                        'action': f"aws rds stop-db-instance --db-instance-identifier {db_id} --region {region}"
-                    })
+                    # Skip Read Replicas - they may have 0 connections intentionally
+                    if db.get('ReadReplicaSourceDBInstanceIdentifier'):
+                        continue
+                    
+                    # Check CloudWatch for database connections in last 7 days
+                    response = cloudwatch.get_metric_statistics(
+                        Namespace='AWS/RDS',
+                        MetricName='DatabaseConnections',
+                        Dimensions=[{'Name': 'DBInstanceIdentifier', 'Value': db_id}],
+                        StartTime=start_time,
+                        EndTime=end_time,
+                        Period=86400,  # 1 day
+                        Statistics=['Maximum']
+                    )
+                    
+                    # Check if there were any connections
+                    datapoints = response.get('Datapoints', [])
+                    max_connections = max([dp['Maximum'] for dp in datapoints], default=0)
+                    
+                    if max_connections == 0:
+                        # No connections in 7 days - this is idle!
+                        rds_pricing = self.PRICING['rds_instances']
+                        monthly_cost = rds_pricing.get(instance_class, rds_pricing['default'])
+                        
+                        # Check if Multi-AZ (doubles the cost)
+                        if db.get('MultiAZ', False):
+                            monthly_cost *= 2
+                        
+                        findings.append({
+                            'type': 'RDS Instance',
+                            'id': db_id,
+                            'region': region,
+                            'details': f"{instance_class} ({engine}){' Multi-AZ' if db.get('MultiAZ') else ''}",
+                            'age': '0 connections in 7 days',
+                            'monthly_cost': monthly_cost,
+                            'action': f"aws rds stop-db-instance --db-instance-identifier {db_id} --region {region}"
+                        })
                     
         except ClientError as e:
             if 'AuthFailure' not in str(e) and 'AccessDenied' not in str(e):
@@ -606,7 +647,7 @@ class AWSWasteFinder:
         self.print_banner()
         
         print("Starting comprehensive waste scan...")
-        print("   This will check all AWS regions for 7 types of waste.\n")
+        print("   This will check all AWS regions for 8 types of waste.\n")
         
         # Verify AWS credentials
         try:
@@ -626,20 +667,43 @@ class AWSWasteFinder:
         print(f"   Found {len(regions)} regions to scan\n")
         print("="*80)
         
-        for i, region in enumerate(regions):
-            print(f"Scanning {region}...", end=" ", flush=True)
-            region_findings = self.scan_region(region)
+        # Use ThreadPoolExecutor for parallel scanning (5 concurrent regions)
+        results = {}
+        completed_count = 0
+        total_regions = len(regions)
+        
+        print(f"Scanning {total_regions} regions in parallel...\n")
+        
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_region = {
+                executor.submit(self.scan_region, region): region 
+                for region in regions
+            }
             
+            for future in as_completed(future_to_region):
+                region = future_to_region[future]
+                completed_count += 1
+                try:
+                    region_findings = future.result()
+                    results[region] = region_findings
+                    
+                    # Print progress as each region completes
+                    if region_findings:
+                        print(f"  [{completed_count}/{total_regions}] {region}: Found {len(region_findings)} waste items")
+                    else:
+                        print(f"  [{completed_count}/{total_regions}] {region}: ✓")
+                        
+                except Exception as e:
+                    logger.warning(f"Error scanning {region}: {e}")
+                    results[region] = []
+                    print(f"  [{completed_count}/{total_regions}] {region}: Error")
+        
+        # Calculate totals
+        for region in regions:
+            region_findings = results.get(region, [])
             if region_findings:
-                print(f" Found {len(region_findings)} waste items")
                 self.findings.extend(region_findings)
                 self.total_waste += sum(f['monthly_cost'] for f in region_findings)
-            else:
-                print("✓")
-            
-            # Rate limiting: avoid API throttling (skip delay on last region)
-            if i < len(regions) - 1:
-                time.sleep(self.SCAN_DELAY)
         
         print("="*80)
         

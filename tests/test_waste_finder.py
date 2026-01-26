@@ -292,20 +292,9 @@ class TestIntegration:
     @mock_aws
     def test_scan_rds_finds_idle_instances(self):
         """Test detection of idle RDS instances with 0 connections"""
-        rds = boto3.client('rds', region_name='us-east-1')
-        
-        # Create an RDS instance
-        rds.create_db_instance(
-            DBInstanceIdentifier='test-idle-db',
-            DBInstanceClass='db.t3.micro',
-            Engine='mysql',
-            MasterUsername='admin',
-            MasterUserPassword='password123'
-        )
-        
         scanner = AWSWasteFinder()
         
-        # Mock CloudWatch to return 0 connections
+        # Mock both RDS paginator and CloudWatch
         with patch('boto3.client') as mock_boto:
             # Create a mock CloudWatch client that returns 0 connections
             mock_cw = MagicMock()
@@ -313,9 +302,10 @@ class TestIntegration:
                 'Datapoints': [{'Maximum': 0}]
             }
             
-            # Create a mock RDS client with the instance
+            # Create a mock RDS client with paginator
             mock_rds = MagicMock()
-            mock_rds.describe_db_instances.return_value = {
+            mock_paginator = MagicMock()
+            mock_paginator.paginate.return_value = [{
                 'DBInstances': [{
                     'DBInstanceIdentifier': 'test-idle-db',
                     'DBInstanceStatus': 'available',
@@ -323,7 +313,8 @@ class TestIntegration:
                     'Engine': 'mysql',
                     'MultiAZ': False
                 }]
-            }
+            }]
+            mock_rds.get_paginator.return_value = mock_paginator
             
             def get_client(service, region_name=None):
                 if service == 'cloudwatch':
@@ -354,7 +345,8 @@ class TestIntegration:
             }
             
             mock_rds = MagicMock()
-            mock_rds.describe_db_instances.return_value = {
+            mock_paginator = MagicMock()
+            mock_paginator.paginate.return_value = [{
                 'DBInstances': [{
                     'DBInstanceIdentifier': 'active-db',
                     'DBInstanceStatus': 'available',
@@ -362,7 +354,8 @@ class TestIntegration:
                     'Engine': 'mysql',
                     'MultiAZ': False
                 }]
-            }
+            }]
+            mock_rds.get_paginator.return_value = mock_paginator
             
             def get_client(service, region_name=None):
                 if service == 'cloudwatch':
@@ -377,3 +370,183 @@ class TestIntegration:
             
             # Should NOT find active RDS instances
             assert len(findings) == 0
+
+    @mock_aws
+    def test_scan_rds_skips_read_replicas(self):
+        """Test that Read Replicas are not flagged even with 0 connections"""
+        scanner = AWSWasteFinder()
+        
+        with patch('boto3.client') as mock_boto:
+            # Mock CloudWatch return 0 connections
+            mock_cw = MagicMock()
+            mock_cw.get_metric_statistics.return_value = {
+                'Datapoints': [{'Maximum': 0}]
+            }
+            
+            # Mock RDS with a read replica
+            mock_rds = MagicMock()
+            mock_paginator = MagicMock()
+            mock_paginator.paginate.return_value = [{
+                'DBInstances': [{
+                    'DBInstanceIdentifier': 'read-replica-db',
+                    'DBInstanceStatus': 'available',
+                    'DBInstanceClass': 'db.t3.micro',
+                    'Engine': 'mysql',
+                    'MultiAZ': False,
+                    'ReadReplicaSourceDBInstanceIdentifier': 'source-db'  # It's a replica!
+                }]
+            }]
+            mock_rds.get_paginator.return_value = mock_paginator
+            
+            def get_client(service, region_name=None):
+                if service == 'cloudwatch':
+                    return mock_cw
+                elif service == 'rds':
+                    return mock_rds
+                return MagicMock()
+            
+            mock_boto.side_effect = get_client
+            
+            findings = scanner.scan_rds_instances('us-east-1')
+            
+            # Should be 0 because it's a replica, even with 0 connections
+            assert len(findings) == 0
+
+    @mock_aws
+    def test_scan_nat_gateway_ignores_inbound_traffic(self):
+        """Test that NAT GW with only INBOUND traffic is not flagged as idle"""
+        scanner = AWSWasteFinder()
+        
+        # Create a mock NAT Gateway
+        ec2 = boto3.client('ec2', region_name='us-east-1')
+        vpc = ec2.create_vpc(CidrBlock='10.0.0.0/16')
+        vpc_id = vpc['Vpc']['VpcId']
+        subnet = ec2.create_subnet(CidrBlock='10.0.1.0/24', VpcId=vpc_id)
+        eip = ec2.allocate_address(Domain='vpc')
+        nat = ec2.create_nat_gateway(SubnetId=subnet['Subnet']['SubnetId'], AllocationId=eip['AllocationId'])
+        nat_id = nat['NatGateway']['NatGatewayId']
+        
+        with patch('boto3.client') as mock_boto:
+            mock_cw = MagicMock()
+            
+            # Mock get_metric_statistics to handle multiple calls
+            def side_effect(*args, **kwargs):
+                metric_name = kwargs.get('MetricName')
+                if metric_name == 'BytesOutToDestination':
+                    return {'Datapoints': [{'Sum': 0}]}  # 0 Outbound
+                elif metric_name == 'BytesInFromDestination':
+                    return {'Datapoints': [{'Sum': 500}]} # 500 Inbound
+                return {}
+            
+            mock_cw.get_metric_statistics.side_effect = side_effect
+            
+            # Create mock EC2 to return our NAT GW
+            mock_ec2 = MagicMock()
+            mock_ec2 = boto3.client('ec2', region_name='us-east-1') # Use real moto client for EC2 logic
+            
+            # We need to mock ONLY CloudWatch but keep real EC2/Moto functionality? 
+            # Or just mock everything. Mocking everything is safer for consistent behavior here.
+            mock_ec2_client = MagicMock()
+            mock_ec2_client.describe_nat_gateways.return_value = {
+                'NatGateways': [{
+                    'NatGatewayId': nat_id,
+                    'SubnetId': 'subnet-123',
+                    'State': 'available'
+                }]
+            }
+
+            def get_client(service, region_name=None):
+                if service == 'cloudwatch':
+                    return mock_cw
+                elif service == 'ec2':
+                    return mock_ec2_client
+                return MagicMock()
+            
+            mock_boto.side_effect = get_client
+            
+            findings = scanner.scan_nat_gateways('us-east-1')
+            
+            # Should be 0 because it has inbound traffic
+            assert len(findings) == 0
+
+    @mock_aws
+    def test_scan_nat_gateway_finds_truly_idle(self):
+        """Test that NAT Gateway with 0 IN and 0 OUT traffic IS flagged"""
+        scanner = AWSWasteFinder()
+        
+        # Mock CloudWatch to return 0 for BOTH metrics
+        with patch('boto3.client') as mock_boto:
+            mock_cw = MagicMock()
+            
+            # Helper to return 0 for both metrics
+            def get_metric_side_effect(*args, **kwargs):
+                metric_name = kwargs.get('MetricName')
+                return {'Datapoints': [{'Sum': 0}]}
+
+            mock_cw.get_metric_statistics.side_effect = get_metric_side_effect
+            
+            # Mock EC2 client to return a NAT Gateway
+            mock_ec2_client = MagicMock()
+            mock_ec2_client.describe_nat_gateways.return_value = {
+                'NatGateways': [{
+                    'NatGatewayId': 'nat-test-idle',
+                    'SubnetId': 'subnet-123',
+                    'State': 'available'
+                }]
+            }
+
+            def get_client(service, region_name=None):
+                if service == 'cloudwatch':
+                    return mock_cw
+                elif service == 'ec2':
+                    return mock_ec2_client
+                return MagicMock()
+            
+            mock_boto.side_effect = get_client
+            
+            findings = scanner.scan_nat_gateways('us-east-1')
+            
+            # Should find 1 waste item because it is truly idle
+            assert len(findings) == 1
+            assert findings[0]['id'] == 'nat-test-idle'
+
+    @mock_aws
+    def test_scan_nat_gateway_finds_truly_idle(self):
+        """Test that NAT Gateway with 0 IN and 0 OUT traffic IS flagged"""
+        scanner = AWSWasteFinder()
+        
+        # Mock CloudWatch to return 0 for BOTH metrics
+        with patch('boto3.client') as mock_boto:
+            mock_cw = MagicMock()
+            
+            # Helper to return 0 for both metrics
+            def get_metric_side_effect(*args, **kwargs):
+                metric_name = kwargs.get('MetricName')
+                return {'Datapoints': [{'Sum': 0}]}
+
+            mock_cw.get_metric_statistics.side_effect = get_metric_side_effect
+            
+            # Mock EC2 client to return a NAT Gateway
+            mock_ec2_client = MagicMock()
+            mock_ec2_client.describe_nat_gateways.return_value = {
+                'NatGateways': [{
+                    'NatGatewayId': 'nat-test-idle',
+                    'SubnetId': 'subnet-123',
+                    'State': 'available'
+                }]
+            }
+
+            def get_client(service, region_name=None):
+                if service == 'cloudwatch':
+                    return mock_cw
+                elif service == 'ec2':
+                    return mock_ec2_client
+                return MagicMock()
+            
+            mock_boto.side_effect = get_client
+            
+            findings = scanner.scan_nat_gateways('us-east-1')
+            
+            # Should find 1 waste item because it is truly idle
+            assert len(findings) == 1
+            assert findings[0]['id'] == 'nat-test-idle'

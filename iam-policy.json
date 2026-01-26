@@ -16,6 +16,8 @@
                 "sagemaker:ListNotebookInstances",
                 "sagemaker:DescribeNotebookInstance",
                 "logs:DescribeLogGroups",
+                "rds:DescribeDBInstances",
+                "cloudwatch:GetMetricStatistics",
                 "sts:GetCallerIdentity"
             ],
             "Resource": "*"
