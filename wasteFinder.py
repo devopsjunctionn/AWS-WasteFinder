@@ -12,7 +12,6 @@ __version__ = "1.3.0"
 
 import boto3
 import logging
-import time
 from datetime import datetime, timedelta, timezone
 from botocore.exceptions import ClientError
 import sys
@@ -676,7 +675,7 @@ class AWSWasteFinder:
         
         with ThreadPoolExecutor(max_workers=5) as executor:
             future_to_region = {
-                executor.submit(self.scan_region, region): region 
+                executor.submit(self.scan_region, region): region
                 for region in regions
             }
             
