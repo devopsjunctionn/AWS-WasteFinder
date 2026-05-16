@@ -2,7 +2,7 @@
 # Python 3.8+ required
 
 # AWS SDK for Python
-boto3>=1.26.0
+boto3>=1.43.9
 
 # Boto3's core functionality (installed automatically with boto3, but listed for completeness)
 botocore>=1.29.0
